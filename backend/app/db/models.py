@@ -33,6 +33,15 @@ class User(Base):
     loyalty_profile: Mapped["LoyaltyProfile | None"] = relationship(back_populates="customer", uselist=False)
 
 
+class CustomerSession(Base):
+    __tablename__ = "customer_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Category(Base):
     __tablename__ = "categories"
 

@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import csv
 from datetime import datetime, timedelta, timezone
+import hashlib
 import hmac
 import io
 import json
@@ -27,6 +28,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.db.models import (
     AdminAuditLog,
     Category,
+    CustomerSession,
     LoyaltyConfiguration,
     LoyaltyProfile,
     LoyaltyTransaction,
@@ -58,6 +60,7 @@ from app.api.schemas import (
     OrderResponse,
     RewardWriteRequest,
     RegisterRequest,
+    RefreshTokenRequest,
     TokenResponse,
     UserProfileUpdate,
     UserResponse,
@@ -244,6 +247,12 @@ def current_user(
     user = db.get(User, user_id) if user_id else None
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not found.")
+    session_id = payload.get("sid")
+    if not isinstance(session_id, str):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Customer session is not active.")
+    customer_session = db.get(CustomerSession, session_id)
+    if customer_session is None or customer_session.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Customer session is not active.")
     return user
 
 
@@ -266,6 +275,21 @@ def current_admin(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def create_customer_session(db: Session, user: User) -> TokenResponse:
+    refresh_token = secrets.token_urlsafe(48)
+    customer_session = CustomerSession(
+        user_id=user.id,
+        refresh_token_hash=hashlib.sha256(refresh_token.encode("utf-8")).hexdigest(),
+    )
+    db.add(customer_session)
+    db.commit()
+    return TokenResponse(
+        access_token=create_access_token(user.id, session_id=customer_session.id),
+        refresh_token=refresh_token,
+        user=user,
+    )
 
 
 @app.post("/api/v1/admin/auth/login", response_model=AdminTokenResponse)
@@ -298,7 +322,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenRe
         db.rollback()
         raise HTTPException(status_code=409, detail="An account with that email or phone already exists.") from exc
     db.refresh(user)
-    return TokenResponse(access_token=create_access_token(user.id), user=user)
+    return create_customer_session(db, user)
 
 
 @app.post("/api/v1/auth/login", response_model=TokenResponse)
@@ -306,7 +330,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     user = db.scalar(select(User).where(User.email == payload.email.strip().lower()))
     if user is None or user.password_hash is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
-    return TokenResponse(access_token=create_access_token(user.id), user=user)
+    return create_customer_session(db, user)
 
 
 @app.post("/api/v1/auth/google", response_model=TokenResponse)
@@ -362,7 +386,45 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)) -> T
             raise HTTPException(status_code=409, detail="This Google account could not be linked.") from exc
         user = linked_user
     db.refresh(user)
-    return TokenResponse(access_token=create_access_token(user.id), user=user)
+    return create_customer_session(db, user)
+
+
+@app.post("/api/v1/auth/refresh", response_model=TokenResponse)
+def refresh_customer_session(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    refresh_hash = hashlib.sha256(payload.refresh_token.encode("utf-8")).hexdigest()
+    customer_session = db.scalar(
+        select(CustomerSession)
+        .where(CustomerSession.refresh_token_hash == refresh_hash)
+        .with_for_update()
+    )
+    if customer_session is None:
+        raise HTTPException(status_code=401, detail="Customer session is not active.")
+    user = db.get(User, customer_session.user_id)
+    if user is None:
+        db.delete(customer_session)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Account not found.")
+
+    refresh_token = secrets.token_urlsafe(48)
+    customer_session.refresh_token_hash = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+    db.commit()
+    return TokenResponse(
+        access_token=create_access_token(user.id, session_id=customer_session.id),
+        refresh_token=refresh_token,
+        user=user,
+    )
+
+
+@app.post("/api/v1/auth/logout", status_code=204)
+def logout_customer(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> Response:
+    refresh_hash = hashlib.sha256(payload.refresh_token.encode("utf-8")).hexdigest()
+    customer_session = db.scalar(
+        select(CustomerSession).where(CustomerSession.refresh_token_hash == refresh_hash)
+    )
+    if customer_session is not None:
+        db.delete(customer_session)
+        db.commit()
+    return Response(status_code=204)
 
 
 @app.get("/api/v1/auth/me", response_model=UserResponse)

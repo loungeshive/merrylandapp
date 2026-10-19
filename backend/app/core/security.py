@@ -22,6 +22,9 @@ def verify_password(password: str, encoded: str) -> bool:
     return hmac.compare_digest(actual.hex(), digest_hex)
 
 
-def create_access_token(user_id: str, role: str = "customer") -> str:
+def create_access_token(user_id: str, role: str = "customer", session_id: str | None = None) -> str:
     expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
-    return jwt.encode({"sub": user_id, "role": role, "exp": expires}, settings.jwt_secret, algorithm="HS256")
+    payload = {"sub": user_id, "role": role, "exp": expires}
+    if session_id is not None:
+        payload["sid"] = session_id
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")

@@ -1,10 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import GoogleSignInButton from "../../components/auth/GoogleSignInButton";
 import { QRCodeSVG } from "qrcode.react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api/v1";
+const AUTH_TOKEN_KEY = "merryland_access_token";
+const REFRESH_TOKEN_KEY = "merryland_refresh_token";
+
+function tokenNeedsRefresh(token: string): boolean {
+  try {
+    const encodedPayload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(window.atob(encodedPayload.padEnd(Math.ceil(encodedPayload.length / 4) * 4, "=")));
+    return typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now() + 60_000;
+  } catch {
+    return true;
+  }
+}
 
 type MenuItem = {
   id: string;
@@ -85,6 +97,7 @@ export default function Home() {
   const [profileDraft, setProfileDraft] = useState({ name: "", phone: "", delivery_address: "" });
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileNotice, setProfileNotice] = useState("");
+  const refreshInFlight = useRef<Promise<string> | null>(null);
 
   const total = useMemo(() => cart.reduce((sum, line) => sum + line.item.price_minor * line.quantity, 0), [cart]);
   const visibleMenu = useMemo(() => {
@@ -119,26 +132,110 @@ export default function Home() {
     }
   }, []);
 
+  async function saveAuthTokens(accessToken: string, refreshToken: string) {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    setToken(accessToken);
+  }
+
+  async function refreshAccessToken(): Promise<string> {
+    if (!refreshInFlight.current) {
+      const refreshToken = window.localStorage.getItem(REFRESH_TOKEN_KEY);
+      if (!refreshToken) {
+        window.localStorage.removeItem(AUTH_TOKEN_KEY);
+        setToken("");
+        setUser(null);
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      const refreshRequest = (async () => {
+        const response = await fetch(`${API}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            window.localStorage.removeItem(AUTH_TOKEN_KEY);
+            window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+            setToken("");
+            setUser(null);
+          }
+          throw new Error(data.detail ?? "Your session could not be renewed.");
+        }
+        await saveAuthTokens(data.access_token, data.refresh_token);
+        return data.access_token as string;
+      })();
+      refreshInFlight.current = refreshRequest.finally(() => {
+        refreshInFlight.current = null;
+      });
+    }
+    return refreshInFlight.current;
+  }
+
   useEffect(() => { void loadMenu(); }, [loadMenu]);
-  async function request(path: string, options: RequestInit = {}) {
-    const response = await fetch(`${API}${path}`, {
+  useEffect(() => {
+    const savedToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!savedToken) return;
+
+    setToken(savedToken);
+    void (async () => {
+      try {
+        let response = await fetch(`${API}/auth/me`, {
+          headers: { Authorization: `Bearer ${savedToken}` },
+        });
+        if (response.status === 401 || response.status === 403) {
+          const renewedToken = await refreshAccessToken();
+          response = await fetch(`${API}/auth/me`, {
+            headers: { Authorization: `Bearer ${renewedToken}` },
+          });
+        }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail ?? "Your saved sign-in could not be restored.");
+        }
+        const profile = data as User;
+        if (profile.id) setToken(window.localStorage.getItem(AUTH_TOKEN_KEY) ?? savedToken);
+        setUser(profile);
+        setProfileDraft({
+          name: profile.name,
+          phone: profile.phone ?? "",
+          delivery_address: profile.delivery_address ?? "",
+        });
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Your saved sign-in could not be restored.");
+      }
+    })();
+  }, []);
+  async function authenticatedFetch(
+    path: string,
+    options: RequestInit = {},
+    initialToken: string = token,
+  ) {
+    const accessToken = initialToken && window.localStorage.getItem(REFRESH_TOKEN_KEY) && tokenNeedsRefresh(initialToken)
+      ? await refreshAccessToken()
+      : initialToken;
+    return fetch(`${API}${path}`, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...options.headers,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
     });
+  }
+  async function request(path: string, options: RequestInit = {}) {
+    const response = await authenticatedFetch(path, options);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail ?? "Something went wrong. Please try again.");
     return data;
   }
 
   async function loadLoyaltyDashboard(accessToken: string) {
-    const headers = { Authorization: `Bearer ${accessToken}` };
     const [dashboardResponse, profileResponse] = await Promise.all([
-      fetch(`${API}/loyalty/dashboard`, { headers }),
-      fetch(`${API}/auth/me`, { headers }),
+      authenticatedFetch("/loyalty/dashboard", {}, accessToken),
+      authenticatedFetch("/auth/me", {}, accessToken),
     ]);
     const [dashboardData, profileData] = await Promise.all([
       dashboardResponse.json().catch(() => ({})),
@@ -177,7 +274,7 @@ export default function Home() {
     const body = Object.fromEntries(form.entries());
     try {
       const result = await request(`/auth/${authMode}`, { method: "POST", body: JSON.stringify(body) });
-      setToken(result.access_token);
+      await saveAuthTokens(result.access_token, result.refresh_token);
       setUser(result.user);
       setShowAuth(false);
       setNotice(`Welcome${authMode === "register" ? " to Merryland" : " back"}, ${result.user.name.split(" ")[0]}.`);
@@ -197,7 +294,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ id_token: idToken }),
       });
-      setToken(result.access_token);
+      await saveAuthTokens(result.access_token, result.refresh_token);
       setUser(result.user);
       setShowAuth(false);
       setNotice(`Welcome to Merryland, ${result.user.name.split(" ")[0]}.`);
@@ -273,9 +370,8 @@ export default function Home() {
     const formData = new FormData();
     formData.append("image", file);
     try {
-      const response = await fetch(`${API}/auth/me/photo`, {
+      const response = await authenticatedFetch("/auth/me/photo", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
       const data = await response.json().catch(() => ({}));
@@ -294,9 +390,8 @@ export default function Home() {
     setProfileBusy(true);
     setProfileNotice("");
     try {
-      const response = await fetch(`${API}/auth/me/photo`, {
+      const response = await authenticatedFetch("/auth/me/photo", {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -376,7 +471,10 @@ export default function Home() {
     }
   }
 
-  function signOut() {
+  async function signOut() {
+    const refreshToken = window.localStorage.getItem(REFRESH_TOKEN_KEY);
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
     setToken("");
     setUser(null);
     setLoyaltyDashboard(null);
@@ -385,6 +483,18 @@ export default function Home() {
     setShowRewards(false);
     setError("");
     setNotice("You have been signed out.");
+    if (refreshToken) {
+      try {
+        const response = await fetch(`${API}/auth/logout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!response.ok) setNotice("Signed out on this device, but the server session could not be revoked.");
+      } catch {
+        setNotice("Signed out on this device, but the server session could not be revoked.");
+      }
+    }
   }
 
   async function redeemLoyaltyReward(rewardId: string) {
@@ -711,17 +821,18 @@ export default function Home() {
       )}
       {showAuth && (
         <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowAuth(false); }}>
-          <form id="account" className="auth-modal" onSubmit={(event) => void submitAuth(event)}>
+          <form id="account" className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onSubmit={(event) => void submitAuth(event)}>
             <button className="modal-close" type="button" aria-label="Close sign in" onClick={() => setShowAuth(false)}>×</button>
             <span className="eyebrow">{authMode === "register" ? "JOIN MERRYLAND" : "WELCOME BACK"}</span>
-            <h2>{authMode === "register" ? "Create your account" : "Sign in to Merryland"}</h2>
+            <h2 id="auth-title">{authMode === "register" ? "Create your account" : "Sign in to Merryland"}</h2>
             <p>{authMode === "register" ? "Create an account to continue with your order." : "Sign in to continue with your order."}</p>
             {!busy && <GoogleSignInButton onIdToken={(idToken) => void submitGoogleAuth(idToken)} onError={setError} />}
             <div className="auth-divider"><span />OR CONTINUE WITH EMAIL<span /></div>
-            {authMode === "register" && <input className="field" name="name" placeholder="Your name" autoComplete="name" required minLength={2} />}
-            {authMode === "register" && <input className="field" name="phone" placeholder="Phone number" type="tel" autoComplete="tel" required minLength={7} />}
-            <input className="field" name="email" placeholder="Email address" type="email" autoComplete="email" required />
-            <input className="field" name="password" placeholder={authMode === "register" ? "Password (10+ characters)" : "Password"} type="password" autoComplete={authMode === "register" ? "new-password" : "current-password"} required minLength={authMode === "register" ? 10 : 1} />
+            {error && <p className="auth-error" role="alert">{error}</p>}
+            {authMode === "register" && <label className="auth-field-label" htmlFor="auth-name">Full name<input className="field" id="auth-name" name="name" autoComplete="name" required minLength={2} /></label>}
+            {authMode === "register" && <label className="auth-field-label" htmlFor="auth-phone">Phone number<input className="field" id="auth-phone" name="phone" type="tel" autoComplete="tel" required minLength={7} /></label>}
+            <label className="auth-field-label" htmlFor="auth-email">Email address<input className="field" id="auth-email" name="email" type="email" autoComplete="email" required /></label>
+            <label className="auth-field-label" htmlFor="auth-password">Password<input className="field" id="auth-password" name="password" type="password" autoComplete={authMode === "register" ? "new-password" : "current-password"} required minLength={authMode === "register" ? 10 : 1} /></label>
             <button className="pay-button" disabled={busy}>{busy ? "Please wait…" : authMode === "register" ? "Create account" : "Sign in"}</button>
             <button className="quiet" type="button" onClick={() => setAuthMode(authMode === "register" ? "login" : "register")}>
               {authMode === "register" ? "Already a member? Sign in" : "New here? Create an account"}

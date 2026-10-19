@@ -79,6 +79,55 @@ def test_google_auth_rejects_unverified_email(monkeypatch):
         assert response.status_code == 401
 
 
+def test_customer_session_refreshes_until_explicit_logout():
+    with TestClient(app) as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "name": "Remembered Customer",
+                "email": "remembered-customer@example.test",
+                "phone": "+254700555402",
+                "password": "a-long-test-password",
+            },
+        )
+        assert registered.status_code == 201
+        initial = registered.json()
+        assert client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {initial['access_token']}"},
+        ).status_code == 200
+
+        refreshed = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": initial["refresh_token"]},
+        )
+        assert refreshed.status_code == 200
+        current = refreshed.json()
+        assert current["refresh_token"] != initial["refresh_token"]
+        assert client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": initial["refresh_token"]},
+        ).status_code == 401
+        assert client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {current['access_token']}"},
+        ).status_code == 200
+
+        signed_out = client.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": current["refresh_token"]},
+        )
+        assert signed_out.status_code == 204
+        assert client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {current['access_token']}"},
+        ).status_code == 401
+        assert client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": current["refresh_token"]},
+        ).status_code == 401
+
+
 def test_customer_can_manage_profile_and_photo():
     with TestClient(app) as client:
         registered = client.post(

@@ -20,6 +20,10 @@ class GoogleAuthRequest(BaseModel):
     id_token: str = Field(min_length=1, max_length=8192)
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=128)
+
+
 class UserResponse(BaseModel):
     id: str
     name: str
@@ -40,6 +44,7 @@ class UserProfileUpdate(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
 
