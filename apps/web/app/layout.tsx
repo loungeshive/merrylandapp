@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import PwaInstallPrompt from "./PwaInstallPrompt";
+import PwaInstallPrompt from "../src/components/pwa/PwaInstallPrompt";
 
 export const metadata: Metadata = {
   title: "Merryland | Food Menu & Ordering",

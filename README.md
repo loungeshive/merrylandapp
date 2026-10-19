@@ -29,12 +29,28 @@ Order items preserve the product name and price at checkout. Payment provider re
 
 ```text
 merrlandfolder/
-  apps/mobile/       Expo + React Native customer app
-  apps/web/          Next.js customer web experience
-  backend/           FastAPI, SQLAlchemy models, Alembic, tests
-  docs/              Architecture, API and deployment notes
-  .env.example
+  apps/
+    mobile/                    Expo + React Native customer app
+    web/
+      app/                     Next.js routes, root layout, manifest and global styles
+      src/
+        components/            Shared authentication and PWA UI
+        features/
+          admin/                Admin dashboard
+          customer/             Customer menu, ordering and account experience
+  backend/
+    app/
+      api/                     FastAPI routes and request/response schemas
+      core/                    Settings, security and Google authentication
+      db/                      SQLAlchemy session and ORM models
+      main.py                  Stable ASGI entry point (app.main:app)
+    alembic/                   Database migrations
+    tests/
+  docs/
+  .env.example                 Environment variable template (no secrets)
 ```
+
+Legacy backend imports such as `app.models` and `app.database` remain as small compatibility modules; new backend code should import from `app.db`, `app.core`, or `app.api` directly.
 
 ### Development plan
 

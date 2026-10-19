@@ -8,10 +8,10 @@ os.environ["JWT_SECRET"] = "test-secret-that-is-long-enough-for-local-tests"
 
 from fastapi.testclient import TestClient
 
-from app.database import SessionLocal
-from app import main as main_module
+from app.db.session import SessionLocal
+from app.api import routes as main_module
 from app.main import app
-from app.models import (
+from app.db.models import (
     Category,
     LoyaltyConfiguration,
     LoyaltyTransaction,
