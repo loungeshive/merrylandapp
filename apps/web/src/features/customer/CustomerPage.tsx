@@ -544,7 +544,7 @@ export default function Home() {
       <header className="topbar">
         <a className="brand" href="#menu" aria-label="Merryland menu">
           <span className="brand-mark" aria-hidden="true">M</span>
-          <span>Merryland<small>Kitchen &amp; Bar</small></span>
+          <span>Merryland<small>Rewards</small></span>
         </a>
         <div className="topbar-tools">
           <label className="search-box">
@@ -618,7 +618,7 @@ export default function Home() {
             {displayedMenu.map((item) => (
               <article className="menu-card" key={item.id}>
                 <div className="menu-photo">
-                  {item.image_url && <img className="menu-product-image" src={item.image_url} alt={item.name} loading="lazy" decoding="async" />}
+                  {item.image_url && <img className="menu-product-image" data-category={item.category_name.toLowerCase()} src={item.image_url} alt={item.name} loading="lazy" decoding="async" />}
                   {!item.image_url && <span className="image-placeholder" aria-hidden="true">M</span>}
                   <span className="prep-badge"><span aria-hidden="true">◷</span> {item.prep_minutes} min</span>
                   {cart.some((line) => line.item.id === item.id) && !menuUnavailable && <span className="added-badge">In your order</span>}

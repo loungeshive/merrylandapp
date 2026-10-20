@@ -519,7 +519,7 @@ export default function AdminPage() {
   if (!token) {
     return (
       <main className="admin-page admin-login-page">
-        <a className="admin-brand" href="/">Merryland <span>Kitchen &amp; Bar</span></a>
+        <a className="admin-brand" href="/">Merryland <span>Rewards</span></a>
         <form className="admin-login-card" onSubmit={(event) => void signIn(event)}>
           <span className="admin-eyebrow">RESTAURANT MANAGEMENT</span>
           <h1>Admin sign in</h1>
@@ -537,7 +537,7 @@ export default function AdminPage() {
   return (
     <main className="admin-page">
       <header className="admin-header">
-        <a className="admin-brand" href="/">Merryland <span>Kitchen &amp; Bar</span></a>
+        <a className="admin-brand" href="/">Merryland <span>Rewards</span></a>
         <div className="admin-header-actions">
           <div className="admin-section-tabs" role="tablist" aria-label="Admin sections">
             <button className={section === "menu" ? "active" : ""} role="tab" aria-selected={section === "menu"} onClick={() => setSection("menu")}>Menu</button>

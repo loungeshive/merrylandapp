@@ -3,9 +3,9 @@ import "./globals.css";
 import PwaInstallPrompt from "../src/components/pwa/PwaInstallPrompt";
 
 export const metadata: Metadata = {
-  title: "Merryland | Food Menu & Ordering",
+  title: "Merryland Rewards | Food Menu & Ordering",
   description: "Browse the Merryland menu, build your order, and check out.",
-  applicationName: "Merryland Kitchen & Bar",
+  applicationName: "Merryland Rewards",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

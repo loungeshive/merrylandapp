@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Merryland Kitchen & Bar",
+    name: "Merryland Rewards",
     short_name: "Merryland",
     description: "Browse the Merryland menu, build your order, and collect rewards.",
     start_url: "/",
