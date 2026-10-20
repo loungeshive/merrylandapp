@@ -617,8 +617,8 @@ export default function Home() {
           <div className="menu-grid">
             {displayedMenu.map((item) => (
               <article className="menu-card" key={item.id}>
-                <div className="menu-photo">
-                  {item.image_url && <img className="menu-product-image" data-category={item.category_name.toLowerCase()} src={item.image_url} alt={item.name} loading="lazy" decoding="async" />}
+                <div className={`menu-photo${item.category_name.toLowerCase().includes("drink") ? " menu-photo-drink" : ""}`}>
+                  {item.image_url && <img className="menu-product-image" data-category={item.category_name.toLowerCase().includes("drink") ? "drinks" : "food"} src={item.image_url} alt={item.name} loading="lazy" decoding="async" />}
                   {!item.image_url && <span className="image-placeholder" aria-hidden="true">M</span>}
                   <span className="prep-badge"><span aria-hidden="true">◷</span> {item.prep_minutes} min</span>
                   {cart.some((line) => line.item.id === item.id) && !menuUnavailable && <span className="added-badge">In your order</span>}
